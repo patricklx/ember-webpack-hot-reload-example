@@ -4,7 +4,7 @@ module.exports = function (source) {
   const options = this.getOptions();
   const resourcePath = this.resourcePath.replace(/\\/g, '/');
 
-  const supportedPaths = ['components', 'helpers', 'modifiers'];
+  const supportedPaths = ['components', 'helpers', 'modifiers', 'templates', 'routers', 'controllers'];
   if (!supportedPaths.some((s) => resourcePath.includes(`/${s}/`))) {
     return source;
   }

@@ -1,16 +1,17 @@
 import Helper from '@ember/component/helper';
 import { getOwner } from '@ember/owner';
 import { registerDestructor } from '@ember/destroyable';
-import { getComponentTemplate, setComponentTemplate } from '@ember/component';
+import { service } from '@ember/service';
+import WebpackHotReloadService from 'hot-reload/services/webpack-hot-reload';
+import { getComponentTemplate } from '@ember/component';
 import Ember from 'ember';
 
-const TemplateOnlyComponent =
-  Ember.__loader.require('@glimmer/runtime').TemplateOnlyComponent;
 
 export default class HotReload extends Helper {
   h: unknown;
   version!: number;
   current: unknown;
+  @service() webpackHotReload!: WebpackHotReloadService;
 
   constructor(...args) {
     super(...args);
@@ -34,60 +35,39 @@ export default class HotReload extends Helper {
         .replace(/\/index.(gjs|gts)$/, '');
       if (id.endsWith(this.current)) {
         this.version = newModule.version;
-        const entry = Object.entries(requirejs.entries).find(([key, value]) => {
-          if (
-            value.module.patched?.exports.default === oldModule.exports.default
-          ) {
-            return true;
-          }
-          const klass = value.module.exports?.default;
-          return (
-            klass &&
-            (klass === oldModule.exports.default ||
-              getComponentTemplate(klass) === oldModule.exports.default)
-          );
-        });
-        if (entry) {
-          if (entry[1].module.patched === oldModule) {
-            this.current = entry[1].module.exports.default;
-            this.recompute();
-            return;
-          }
-          if (
-            getComponentTemplate(entry[1].module.exports.default) ===
-            oldModule.exports.default
-          ) {
-            let klass = null;
-            if (
-              entry[1].module.exports.default instanceof TemplateOnlyComponent
-            ) {
-              klass = new TemplateOnlyComponent();
-            } else {
-              klass = class extends entry[1].module.exports.default {};
-            }
-            setComponentTemplate(newModule.exports.default, klass);
-            define(entry[0], () => klass);
-            requirejs.entries[entry[0]].module.patched = oldModule;
-            this.current = klass;
-            this.recompute();
-            return;
-          }
-        }
+        this.current = null;
         this.recompute();
       }
       return;
     }
 
-    if (!this.current?.prototype) {
+    if (!this.current) {
+      return;
+    }
+
+    if (this.current === oldModule.exports.default) {
+      this.current = newModule.exports.default;
+      this.recompute();
+      return;
+    }
+
+    if (
+      oldModule.exports.default?.__meta &&
+      oldModule.exports.default?.__id &&
+      getComponentTemplate(this.current) === oldModule.exports.default
+    ) {
+      this.current = this.webpackHotReload.getLatestChange(this.current);
+      this.recompute();
       return;
     }
 
     for (const [name, exp] of Object.entries(oldModule.exports)) {
-      if (exp && this.current?.prototype instanceof exp) {
+      if (exp && this.current === exp) {
         this.current = newModule.exports[name];
         if (!this.current) {
           newModule.invalidate();
         }
+        this.recompute();
         return;
       }
     }
@@ -102,10 +82,23 @@ export default class HotReload extends Helper {
       const type = named.type;
       if (type === 'component') {
         this.current = name;
-        return this.current + '__hot_version__' + this.version;
+        return `${this.current}__hot_version__${this.version}`;
       }
-      this.current = getOwner(this)!.lookup(`${type}:${name}`);
+      if (type === 'modifier') {
+        this.current = getOwner(this)!.factoryFor(
+          `modifier:${name}__hot_version__${this.version}`,
+        )?.class;
+        return this.current;
+      }
+      this.current = getOwner(this)!.lookup(
+        `helper:${name}__hot_version__${this.version}`,
+      );
+    } else {
+      // if we are here, its a curried value
+      const symb = Object.getOwnPropertySymbols(positional[0]).find(s => s.description === 'INNER')!;
+      this.current = positional[0][symb];
     }
     return this.current;
   }
 }
+

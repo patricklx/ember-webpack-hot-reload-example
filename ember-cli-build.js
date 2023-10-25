@@ -6,6 +6,9 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 module.exports = function (defaults) {
   const app = new EmberApp(defaults, {
     'ember-cli-babel': { enableTypeScriptTransform: true },
+    babel: {
+      plugins: [require.resolve('./babel-plugin.js')]
+    }
   });
 
   const { Webpack } = require('@embroider/webpack');
