@@ -54,8 +54,9 @@ const builtInHelpers = [
 
 const hotAstProcessor = {
   options: {
-    itsStatic: false
+    itsStatic: false,
   },
+  counter: 0,
   replaceInAst(ast: glimmer.ASTv1.Template) {
     const hotReplaced = {
       components: new Set<string>(),
@@ -63,18 +64,34 @@ const hotAstProcessor = {
       modifiers: new Set<string>(),
       others: new Set<string>(),
       info: {
-        components: {} as {[x:string]: { resolvedPath?: string }},
-        helpers: {} as {[x:string]: {nodes: ASTv1.PathExpression[], resolvedPath: string }},
-        modifiers: {} as {[x:string]: {nodes: ASTv1.PathExpression[], resolvedPath: string }}
-      }
-    }
+        components: {} as { [x: string]: { resolvedPath?: string } },
+        helpers: {} as {
+          [x: string]: { nodes: ASTv1.PathExpression[]; resolvedPath: string };
+        },
+        modifiers: {} as {
+          [x: string]: { nodes: ASTv1.PathExpression[]; resolvedPath: string };
+        },
+      },
+    };
 
     const components = hotReplaced.info.components;
     const helpers = hotReplaced.info.helpers;
     const modifiers = hotReplaced.info.modifiers;
 
-    const findBlockParams = function(expression: string, p: WalkerPath<ASTv1.BlockStatement|ASTv1.Block|ASTv1.ElementNode|ASTv1.PathExpression>): boolean {
-      if (p.node && p.node.type === 'BlockStatement' && p.node.program.blockParams.includes(expression)) {
+    const findBlockParams = function (
+      expression: string,
+      p: WalkerPath<
+        | ASTv1.BlockStatement
+        | ASTv1.Block
+        | ASTv1.ElementNode
+        | ASTv1.PathExpression
+      >,
+    ): boolean {
+      if (
+        p.node &&
+        p.node.type === 'BlockStatement' &&
+        p.node.program.blockParams.includes(expression)
+      ) {
         return true;
       }
       const node = p.node as any;
@@ -84,181 +101,188 @@ const hotAstProcessor = {
       if (!p.parent) return false;
       return findBlockParams(expression, p.parent as any);
     };
-
+    const changes = [];
     const visitor: NodeVisitor = {
-      Program: {
-        exit(ast: ASTv1.Program, path: WalkerPath<ASTv1.Program>) {
-          const createComponentLetBlockExpr = comp => {
-            let lookup = `${comp[1].resolvedPath}`
-            lookup = `webpack-hot-reload (component ${lookup}) type='component'`
-            return glimmer.preprocess(`{{#let (${lookup}) as |${comp[0]}|}}{{/let}}`)
-                .body[0]
-          }
-          const handleHelper = helper => {
-            let lookup = `${helper.resolvedPath}`
-            lookup = `webpack-hot-reload (helper ${lookup}) type='helper'`
-            return glimmer.preprocess(
-                `{{#let (${lookup}) as |${helper.nodes[0].original}|}}{{/let}}`
-            ).body[0]
-          }
-          const handleModifier = modifier => {
-            let lookup = `${modifier.resolvedPath}`
-            lookup = `(webpack-hot-reload (helper ${lookup}))`
-            return glimmer.preprocess(
-                `{{#let ${lookup} as |${modifier.nodes[0].original}|}}{{/let}}`
-            ).body[0]
-          }
-
-          let body = []
-          const root = body
-          Object.entries(components).forEach(c => {
-            const letComponent = createComponentLetBlockExpr(c)
-            body.push(letComponent)
-            body = letComponent.program.body
-          })
-          Object.values(helpers).forEach(c => {
-            const letHelper = handleHelper(c)
-            if (!letHelper) return
-            body.push(letHelper)
-            body = letHelper.program.body
-          })
-          Object.values(modifiers).forEach(c => {
-            const letModifier = handleModifier(c)
-            if (!letModifier) return
-            body.push(letModifier)
-            body = letModifier.program.body
-          })
-          body.push(...ast.body)
-          ast.body = root
-        }
-      },
       PathExpression: (node, p) => {
-        if ((p.parentNode?.type === 'SubExpression' || p.parentNode?.type === 'MustacheStatement') && p.parentNode.params.includes(node)) {
+        if (
+          (p.parentNode?.type === 'SubExpression' ||
+            p.parentNode?.type === 'MustacheStatement') &&
+          p.parentNode.params.includes(node)
+        ) {
           return;
         }
         if (node.original === 'this') return;
         if (node.original === 'block') return;
-        if (node.original === 'helper' || node.original === 'modifier' || node.original === 'component') {
-          if (p.parentNode?.type === 'SubExpression' || p.parentNode?.type === 'MustacheStatement') {
-            const originalPath = p.parentNode.params[0];
-            let original = '';
-
-            if (originalPath?.type === 'PathExpression' || originalPath?.type === 'StringLiteral') {
-              original = originalPath.original;
-            }
-
-            if (originalPath?.type === 'SubExpression' && originalPath.path.type === 'PathExpression' && originalPath.path.original === 'ensure-safe-component') {
-              const sub = originalPath.params[0];
-              if (sub?.type === 'PathExpression' || sub?.type === 'StringLiteral') {
-                original = sub.original;
-              }
-            }
-
-            const choice = { components, modifiers, helpers };
-            const c = choice[`${node.original}s`];
-            c[node.original] = c[node.original] || {} as any;
-            c[node.original]!.resolvedPath = original;
-            c[node.original]!.resolvedPath = original;
-            hotReplaced[`${node.original}s`].add(original);
-          }
+        const params = [];
+        const blockParams = [];
+        const letBlock = glimmer.builders.path('let');
+        if (
+          node.original === 'helper' ||
+          node.original === 'component'
+        ) {
+          const sub = glimmer.builders.sexpr(
+            node.original,
+            [ { ...node } ]
+          );
+          const param = glimmer.builders.sexpr(
+            'webpack-hot-reload',
+            [sub],
+            glimmer.builders.hash([
+              glimmer.builders.pair(
+                'type',
+                glimmer.builders.string(node.original),
+              ),
+            ]),
+          );
+          params.push(param);
+          const name = node.original + '_' + this.counter;
+          blockParams.push(name);
+          node.type = 'PathExpression';
+          node.original = name;
+          const block = glimmer.builders.blockItself([{...node}], blockParams);
+          const b = glimmer.builders.block(letBlock, params, null, block);
+          changes.push([node, b]);
+          this.counter++;
+          return;
         }
-        if (findBlockParams(node.original.split('.')[0]!, p)) return;
         if (!builtInHelpers.includes(node.original)) {
           if (p.parentNode?.type === 'ElementModifierStatement') return;
         }
-        const originalPath = node.original;
-          if (node.original.includes('.')) {
-            node.original = node.original.replace(/\./g, '_sep_');
-          }
-          const firstLetter = node.original.replace('hot_', '').split('_sep_').slice(-1)[0]![0]!;
-          if (!node.original.startsWith('hot_')) {
-            node.original = 'hot_' + node.original;
-          }
-          if (this.options.itsStatic && p.parentNode?.type === 'MustacheStatement' || firstLetter === firstLetter.toUpperCase()) {
-            if (!node.original.startsWith('Hot_')) {
-              node.original = 'Hot_' + node.original;
-            }
-            if (node.parts) {
-              node.parts.length = 0;
-              node.parts[0] = node.original;
-            }
-            hotReplaced.components.add(originalPath);
-            components[node.original] = {
-              resolvedPath: originalPath,
-            };
-            return;
-          }
-          if (modifiers[node.original]) {
-            return;
-          }
-          // its a helper
-          if (!node.original.startsWith('hot_')) {
-            node.original = 'hot_' + node.original;
-          }
-          node.original = node.original.replace(/-/g, '_');
-          if (node.parts) {
-            node.parts.length = 0;
-            node.parts[0] = node.original;
-          }
-          helpers[node.original] = helpers[node.original] || { nodes: [], resolvedPath: originalPath };
-          helpers[node.original]!.nodes.push(node);
+        if (node.original.includes('.')) {
+          node.original = node.original.replace(/\./g, '_sep_');
+        }
+        const firstLetter = node.original
+          .split('.')
+          .slice(-1)[0]![0]!;
+        let type = 'helper';
+        if (
+          (this.options.itsStatic &&
+            p.parentNode?.type === 'MustacheStatement') ||
+          firstLetter === firstLetter.toUpperCase()
+        ) {
+          type = 'component';
+        }
+        const sub = glimmer.builders.sexpr(
+          type,
+          [ { ...node } ]
+        );
+        const param = glimmer.builders.sexpr(
+          'webpack-hot-reload',
+          [sub],
+          glimmer.builders.hash([
+            glimmer.builders.pair(
+              'type',
+              glimmer.builders.string(type),
+            ),
+          ]),
+        );
+        params.push(param);
+        const name = type + '_' + this.counter;
+        blockParams.push(name);
+        node.type = 'PathExpression';
+        node.original = name;
+        const block = glimmer.builders.blockItself([{...node}], blockParams);
+        const b = glimmer.builders.block(letBlock, params, null, block);
+        changes.push([node, b]);
+        this.counter++;
       },
-      ElementNode: (element: ASTv1.ElementNode, p: WalkerPath<ASTv1.ElementNode>) => {
+      ElementNode: (
+        element: ASTv1.ElementNode,
+        p: WalkerPath<ASTv1.ElementNode>,
+      ) => {
+        const params = [];
+        const blockParams = [];
+        const letBlock = glimmer.builders.path('let');
         element.modifiers.forEach((modifier) => {
-          const p = modifier.path;
-          let original = '';
-          if (p.type === 'PathExpression' || p.type === 'StringLiteral') {
-            original = p.original;
-          }
-          if (builtInHelpers.includes(original)) return;
-
-          const originalPath = original;
-          if (original.includes('.')) {
-            original = original.replace(/\./g, '_sep_');
-          }
-         original = original.replace(/-/g, '_');
-          if (!original.startsWith('hot_')) {
-            p.type = 'PathExpression';
-            p.original = 'hot_' + original;
-            if (p.parts) {
-              p.parts[0] = p.original;
-            }
-          }
-          modifiers[p.original] = modifiers[p.original] || { resolvedPath: originalPath, nodes: [] };
-          modifiers[p.original]!.nodes.push(p);
-          delete helpers[p.original];
+          const sub = glimmer.builders.sexpr(
+            'modifier',
+            [ { ...modifier.path } ]
+          );
+          const param = glimmer.builders.sexpr(
+            'webpack-hot-reload',
+            [sub],
+            glimmer.builders.hash([
+              glimmer.builders.pair(
+                'type',
+                glimmer.builders.string('modifier'),
+              ),
+            ]),
+          );
+          params.push(param);
+          const name = 'modifier_' + this.counter;
+          blockParams.push(name);
+          modifier.path.type = 'PathExpression';
+          modifier.path.original = 'modifier_' + this.counter;
+          this.counter++;
         });
-        if (builtInComponents.includes(element.tag))
+
+
+        if (builtInComponents.includes(element.tag)) {
+          const block = glimmer.builders.blockItself([{...element}], blockParams);
+          const b = glimmer.builders.block(letBlock, params, null, block);
+          changes.push([element, b]);
           return;
-        const resolvedPath = element.tag;
-        if (element.tag.includes('.')) {
-          element.tag = element.tag.replace(/\./g, '_sep_');
         }
-        if (!element.tag.startsWith('Hot_')) {
-          element.tag = 'Hot_' + element.tag;
+        const sub = glimmer.builders.sexpr(
+          'component',
+          [ glimmer.builders.string(element.tag) ]
+        );
+        const param = glimmer.builders.sexpr(
+          'webpack-hot-reload',
+          [sub],
+          glimmer.builders.hash([
+            glimmer.builders.pair(
+              'type',
+              glimmer.builders.string('component'),
+            ),
+          ]),
+        );
+        params.push(param);
+        const name = 'Component_' + this.counter;
+        blockParams.push(name);
+        element.tag = name;
+        const block = glimmer.builders.blockItself([{...element}], blockParams);
+        const b = glimmer.builders.block(letBlock, params, null, block);
+        changes.push([element, b]);
+        this.counter++;
+      },
+      Program: {
+        exit() {
+          changes.forEach(([oldNode, newNode]) => {
+            Object.assign(oldNode, newNode);
+          })
         }
-        hotReplaced.components.add(resolvedPath);
-        components[element.tag] = {
-          resolvedPath: resolvedPath
-        };
       }
     };
     glimmer.traverse(ast, visitor);
 
-    const createComponentLetBlockExpr = (comp: [key: string, info: {resolvedPath?: string}]) => {
+    const createComponentLetBlockExpr = (
+      comp: [key: string, info: { resolvedPath?: string }],
+    ) => {
       let lookup = `${comp[1].resolvedPath}`;
       lookup = `webpack-hot-reload (component ${lookup}) type='component'`;
-      return glimmer.preprocess(`{{#let (${lookup}) as |${comp[0]}|}}{{/let}}`).body[0] as glimmer.AST.BlockStatement;
+      return glimmer.preprocess(`{{#let (${lookup}) as |${comp[0]}|}}{{/let}}`)
+        .body[0] as glimmer.AST.BlockStatement;
     };
-    const handleHelper = (helper: { nodes: ASTv1.PathExpression[], resolvedPath: string }) => {
+    const handleHelper = (helper: {
+      nodes: ASTv1.PathExpression[];
+      resolvedPath: string;
+    }) => {
       let lookup = `${helper.resolvedPath}`;
       lookup = `webpack-hot-reload (helper ${lookup}) type='helper'`;
-      return glimmer.preprocess(`{{#let (${lookup}) as |${helper.nodes[0]!.original}|}}{{/let}}`).body[0] as glimmer.AST.BlockStatement;
+      return glimmer.preprocess(
+        `{{#let (${lookup}) as |${helper.nodes[0]!.original}|}}{{/let}}`,
+      ).body[0] as glimmer.AST.BlockStatement;
     };
-    const handleModifier = (modifier: { nodes: ASTv1.PathExpression[], resolvedPath: string }) => {
-      let lookup =  `${modifier.resolvedPath}`;
+    const handleModifier = (modifier: {
+      nodes: ASTv1.PathExpression[];
+      resolvedPath: string;
+    }) => {
+      let lookup = `${modifier.resolvedPath}`;
       lookup = `(webpack-hot-reload (helper ${lookup}))`;
-      return glimmer.preprocess(`{{#let ${lookup} as |${modifier.nodes[0]!.original}|}}{{/let}}`).body[0] as glimmer.AST.BlockStatement;
+      return glimmer.preprocess(
+        `{{#let ${lookup} as |${modifier.nodes[0]!.original}|}}{{/let}}`,
+      ).body[0] as glimmer.AST.BlockStatement;
     };
 
     let body: glimmer.AST.Statement[] = [];
@@ -289,19 +313,25 @@ const hotAstProcessor = {
     const ast = glimmer.preprocess(contents);
     this.replaceInAst(ast);
     return glimmer.print(ast);
-  }
+  },
 };
 
-export default function hotReplaceAst({ types: t }: { types: BabelTypes}) {
+export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
   return {
     name: 'hbs-imports',
     visitor: {
       CallExpression(path) {
         const call = path.node;
-        if ((call.callee as V8IntrinsicIdentifier).name === 'precompileTemplate' && call.arguments[0]?.type === 'StringLiteral') {
-          call.arguments[0].value = hotAstProcessor.processAst(call.arguments[0].value);
+        if (
+          (call.callee as V8IntrinsicIdentifier).name ===
+            'precompileTemplate' &&
+          call.arguments[0]?.type === 'StringLiteral'
+        ) {
+          call.arguments[0].value = hotAstProcessor.processAst(
+            call.arguments[0].value,
+          );
         }
-      }
-    }
+      },
+    },
   } as PluginObj;
 }
