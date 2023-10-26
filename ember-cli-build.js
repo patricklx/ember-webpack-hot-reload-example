@@ -41,7 +41,7 @@ module.exports = function (defaults) {
             ),
             watch: false,
           },
-          hot: 'only',
+          hot: true,
         },
         plugins: [
           new HtmlWebpackPlugin({

@@ -116,6 +116,8 @@
     "edition": "octane"
   },
   "dependencies": {
+    "@babel/plugin-proposal-decorators": "^7.23.2",
+    "@babel/plugin-transform-typescript": "^7.22.15",
     "@babel/types": "^7.23.0",
     "@glimmer/syntax": "^0.85.3",
     "html-webpack-plugin": "^5.5.3",

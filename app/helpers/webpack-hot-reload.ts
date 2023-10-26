@@ -7,7 +7,7 @@ import { getComponentTemplate } from '@ember/component';
 import Ember from 'ember';
 
 
-export default class HotReload extends Helper {
+export default class WebpackHotReload extends Helper {
   h: unknown;
   version!: number;
   current: unknown;

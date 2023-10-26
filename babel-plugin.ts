@@ -1,9 +1,18 @@
 import type * as BabelCoreNamespace from '@babel/core';
-import { PluginObj } from '@babel/core';
+import { NodePath, PluginObj, parse } from '@babel/core';
 import type * as BabelTypesNamespace from '@babel/types';
-import { V8IntrinsicIdentifier } from '@babel/types';
+import decoratorTransform from '@babel/plugin-proposal-decorators';
+import {
+  ExpressionStatement,
+  Identifier,
+  ImportDeclaration,
+  ImportDefaultSpecifier,
+  ImportSpecifier,
+  Program,
+  V8IntrinsicIdentifier
+} from '@babel/types';
 import * as glimmer from '@glimmer/syntax';
-import { ASTv1, NodeVisitor, WalkerPath } from '@glimmer/syntax';
+import { ASTv1, NodeVisitor, Path, WalkerPath } from '@glimmer/syntax';
 
 export type Babel = typeof BabelCoreNamespace;
 export type BabelTypes = typeof BabelTypesNamespace;
@@ -57,7 +66,7 @@ const hotAstProcessor = {
     itsStatic: false,
   },
   counter: 0,
-  replaceInAst(ast: glimmer.ASTv1.Template) {
+  replaceInAst(ast: glimmer.ASTv1.Template, importVar?: string, imports?: string[]) {
     const hotReplaced = {
       components: new Set<string>(),
       helpers: new Set<string>(),
@@ -101,7 +110,7 @@ const hotAstProcessor = {
       if (!p.parent) return false;
       return findBlockParams(expression, p.parent as any);
     };
-    const changes = [];
+    const changes: [ASTv1.Node, ASTv1.Node][] = [];
     const visitor: NodeVisitor = {
       PathExpression: (node, p) => {
         if (
@@ -113,16 +122,28 @@ const hotAstProcessor = {
         }
         if (node.original === 'this') return;
         if (node.original === 'block') return;
+        if (node.original.startsWith('this.')) return;
+        if (findBlockParams(node.original.split('.')[0], p)) return;
+        if (importVar) {
+          if (imports.includes(node.original)) {
+            node.original = `${importVar}.${node.original}`;
+          }
+          return;
+        }
         const params = [];
         const blockParams = [];
         const letBlock = glimmer.builders.path('let');
         if (
-          node.original === 'helper' ||
-          node.original === 'component'
+            node.original === 'helper' ||
+            node.original === 'component' ||
+            node.original === 'modifier'
         ) {
+          if (p.parentNode.params[0].original && findBlockParams(p.parentNode.params[0].original.split('.')[0], p)) return;
+          if (p.parentNode.params[0].original?.includes('.')) return;
           const sub = glimmer.builders.sexpr(
-            node.original,
-            [ { ...node } ]
+              node.original,
+              [ ...p.parentNode.params ],
+              {...p.parentNode.hash}
           );
           const param = glimmer.builders.sexpr(
             'webpack-hot-reload',
@@ -139,17 +160,22 @@ const hotAstProcessor = {
           blockParams.push(name);
           node.type = 'PathExpression';
           node.original = name;
-          const block = glimmer.builders.blockItself([{...node}], blockParams);
+          const block = glimmer.builders.blockItself([{...p.parentNode}], blockParams);
           const b = glimmer.builders.block(letBlock, params, null, block);
-          changes.push([node, b]);
+          if (p.parentNode.type === 'SubExpression') {
+            changes.push([p.parentNode, param]);
+            this.counter++;
+            return;
+          }
+          changes.push([p.parentNode, b]);
           this.counter++;
+          return;
+        }
+        if (builtInHelpers.includes(node.original)) {
           return;
         }
         if (!builtInHelpers.includes(node.original)) {
           if (p.parentNode?.type === 'ElementModifierStatement') return;
-        }
-        if (node.original.includes('.')) {
-          node.original = node.original.replace(/\./g, '_sep_');
         }
         const firstLetter = node.original
           .split('.')
@@ -163,8 +189,8 @@ const hotAstProcessor = {
           type = 'component';
         }
         const sub = glimmer.builders.sexpr(
-          type,
-          [ { ...node } ]
+            type,
+            [ glimmer.builders.string(node.original) ]
         );
         const param = glimmer.builders.sexpr(
           'webpack-hot-reload',
@@ -181,9 +207,10 @@ const hotAstProcessor = {
         blockParams.push(name);
         node.type = 'PathExpression';
         node.original = name;
-        const block = glimmer.builders.blockItself([{...node}], blockParams);
+        if (!params.length) return;
+        const block = glimmer.builders.blockItself([{...p.parentNode} as typeof p.parentNode], blockParams);
         const b = glimmer.builders.block(letBlock, params, null, block);
-        changes.push([node, b]);
+        changes.push([p.parentNode!, b]);
         this.counter++;
       },
       ElementNode: (
@@ -194,9 +221,14 @@ const hotAstProcessor = {
         const blockParams = [];
         const letBlock = glimmer.builders.path('let');
         element.modifiers.forEach((modifier) => {
+          if (importVar) {
+            return;
+          }
+          if (!modifier.path.original) return;
+          if (modifier.path.original && modifier.path.original.includes('.')) return
           const sub = glimmer.builders.sexpr(
-            'modifier',
-            [ { ...modifier.path } ]
+              'modifier',
+              [ { ...(modifier.path.original && glimmer.builders.string(modifier.path.original) || modifier.path) } ]
           );
           const param = glimmer.builders.sexpr(
             'webpack-hot-reload',
@@ -216,31 +248,37 @@ const hotAstProcessor = {
           this.counter++;
         });
 
-
-        if (builtInComponents.includes(element.tag)) {
-          const block = glimmer.builders.blockItself([{...element}], blockParams);
-          const b = glimmer.builders.block(letBlock, params, null, block);
-          changes.push([element, b]);
+        if (findBlockParams(element.tag.split('.')[0], p))
+          return;
+        if (importVar) {
+          if (imports.includes(element.tag)) {
+            element.tag = `${importVar}.${element.tag}`;
+          }
           return;
         }
-        const sub = glimmer.builders.sexpr(
-          'component',
-          [ glimmer.builders.string(element.tag) ]
-        );
-        const param = glimmer.builders.sexpr(
-          'webpack-hot-reload',
-          [sub],
-          glimmer.builders.hash([
-            glimmer.builders.pair(
-              'type',
-              glimmer.builders.string('component'),
-            ),
-          ]),
-        );
-        params.push(param);
-        const name = 'Component_' + this.counter;
-        blockParams.push(name);
-        element.tag = name;
+        if (builtInComponents.includes(element.tag)) {
+          return;
+        }
+        if (element.tag[0] === element.tag[0].toUpperCase()) {
+          const sub = glimmer.builders.sexpr(
+              'component',
+              [ glimmer.builders.string(element.tag) ]
+          );
+          const param = glimmer.builders.sexpr(
+              'webpack-hot-reload',
+              [sub],
+              glimmer.builders.hash([
+                glimmer.builders.pair(
+                    'type',
+                    glimmer.builders.string('component'),
+                ),
+              ]),
+          );
+          params.push(param);
+          const name = 'Component_' + this.counter;
+          blockParams.push(name);
+          element.tag = name;
+        }
         const block = glimmer.builders.blockItself([{...element}], blockParams);
         const b = glimmer.builders.block(letBlock, params, null, block);
         changes.push([element, b]);
@@ -249,86 +287,103 @@ const hotAstProcessor = {
       Program: {
         exit() {
           changes.forEach(([oldNode, newNode]) => {
+            for (var member in oldNode) delete oldNode[member];
             Object.assign(oldNode, newNode);
           })
         }
       }
-    };
+    }
+
     glimmer.traverse(ast, visitor);
-
-    const createComponentLetBlockExpr = (
-      comp: [key: string, info: { resolvedPath?: string }],
-    ) => {
-      let lookup = `${comp[1].resolvedPath}`;
-      lookup = `webpack-hot-reload (component ${lookup}) type='component'`;
-      return glimmer.preprocess(`{{#let (${lookup}) as |${comp[0]}|}}{{/let}}`)
-        .body[0] as glimmer.AST.BlockStatement;
-    };
-    const handleHelper = (helper: {
-      nodes: ASTv1.PathExpression[];
-      resolvedPath: string;
-    }) => {
-      let lookup = `${helper.resolvedPath}`;
-      lookup = `webpack-hot-reload (helper ${lookup}) type='helper'`;
-      return glimmer.preprocess(
-        `{{#let (${lookup}) as |${helper.nodes[0]!.original}|}}{{/let}}`,
-      ).body[0] as glimmer.AST.BlockStatement;
-    };
-    const handleModifier = (modifier: {
-      nodes: ASTv1.PathExpression[];
-      resolvedPath: string;
-    }) => {
-      let lookup = `${modifier.resolvedPath}`;
-      lookup = `(webpack-hot-reload (helper ${lookup}))`;
-      return glimmer.preprocess(
-        `{{#let ${lookup} as |${modifier.nodes[0]!.original}|}}{{/let}}`,
-      ).body[0] as glimmer.AST.BlockStatement;
-    };
-
-    let body: glimmer.AST.Statement[] = [];
-    const root = body;
-    Object.entries(components).forEach((c) => {
-      const letComponent = createComponentLetBlockExpr(c);
-      body.push(letComponent);
-      body = letComponent.program.body;
-    });
-    Object.values(helpers).forEach((c) => {
-      const letHelper = handleHelper(c);
-      if (!letHelper) return;
-      body.push(letHelper);
-      body = letHelper.program.body;
-    });
-    Object.values(modifiers).forEach((c) => {
-      const letModifier = handleModifier(c);
-      if (!letModifier) return;
-      body.push(letModifier);
-      body = letModifier.program.body;
-    });
-    body.push(...ast.body);
-    ast.body = root;
-    return hotReplaced;
   },
 
-  processAst(contents: string) {
+  processAst(contents: string, importVar?: string, imports?: string[]) {
     const ast = glimmer.preprocess(contents);
-    this.replaceInAst(ast);
+    this.replaceInAst(ast, importVar, imports);
     return glimmer.print(ast);
   },
 };
 
 export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
+  const imports: string[] = [];
+  const importMap: Record<string, string>  = {};
+  let tracked: Identifier;
+  let importVar: Identifier;
+  let templateImportSpecifier = '';
   return {
     name: 'hbs-imports',
     visitor: {
+      Program: {
+        enter(path: NodePath<Program>) {
+          const node = path.node;
+          const templateImport = node.body.find(i => i.type === 'ImportDeclaration' && i.source.value === '@ember/template-compiler');
+          const def = (templateImport as ImportDeclaration).specifiers[0];
+          templateImportSpecifier = (def as any).local.name;
+          tracked = path.scope.generateUidIdentifier('tracked');
+          importVar = path.scope.generateUidIdentifier('__imports__')
+          node.body.push(
+              t.importDeclaration([
+                    t.importDefaultSpecifier(tracked)
+                  ],
+                  t.stringLiteral('@glimmer/tracking')
+              )
+          );
+        },
+        exit(path: NodePath<Program>) {
+          const node = path.node;
+          const lastImport = [...node.body].reverse().find(x => x.type === 'ImportDeclaration')!;
+          const idx = node.body.indexOf(lastImport);
+          const importsVar = t.variableDeclaration('let', [t.variableDeclarator(
+              importVar
+          )]);
+          const klass = t.classExpression(null, null, t.classBody(imports.map(i => t.classProperty(t.identifier(i), t.identifier(i), null, [t.decorator(tracked)]))));
+          const assignment = t.expressionStatement(t.assignmentExpression('=', importVar, t.newExpression(klass, [])));
+          const hotAccepts: ExpressionStatement[] = [];
+          for (const imp of imports) {
+            const source = importMap[imp];
+            const ast = parse(`import.meta.hot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`);
+            const impHot = ast?.program.body[0] as ExpressionStatement;
+            hotAccepts.push(impHot);
+          }
+          const ifHot = t.ifStatement(
+              t.memberExpression(t.metaProperty(t.identifier('import'), t.identifier('meta')), t.identifier('webpackHot')),
+              t.blockStatement([assignment, ...hotAccepts])
+          )
+
+          node.body.splice(idx, 0, importsVar, ifHot);
+        }
+      },
+      ImportDeclaration(path: NodePath<ImportDeclaration>) {
+        path.node.specifiers.forEach((s) =>  {
+          imports.push(s.local.name);
+          importMap[s.local.name] = path.node.source.value;
+        });
+      },
       CallExpression(path) {
         const call = path.node;
+        if (templateImportSpecifier && (call.callee as V8IntrinsicIdentifier).name === templateImportSpecifier && (call.arguments[0]?.type === 'StringLiteral' || call.arguments[0]?.type === 'TemplateLiteral')) {
+          if (call.arguments[0].type === 'StringLiteral') {
+            call.arguments[0].value = hotAstProcessor.processAst(
+                call.arguments[0].value,
+                importVar.name,
+                imports
+            );
+          }
+          if (call.arguments[0].type === 'TemplateLiteral' && call.arguments[0].quasis[0]) {
+            call.arguments[0].quasis[0].value.raw = hotAstProcessor.processAst(
+                call.arguments[0].quasis[0].value.raw,
+                importVar.name,
+                imports
+            );
+          }
+        }
         if (
           (call.callee as V8IntrinsicIdentifier).name ===
             'precompileTemplate' &&
           call.arguments[0]?.type === 'StringLiteral'
         ) {
           call.arguments[0].value = hotAstProcessor.processAst(
-            call.arguments[0].value,
+            call.arguments[0].value
           );
         }
       },
