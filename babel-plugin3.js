@@ -288,10 +288,10 @@ function hotReplaceAst(_a) {
           if (templateImport) {
             var def = templateImport.specifiers[0];
             templateImportSpecifier = def.local.name;
+            tracked = path.scope.generateUidIdentifier('tracked');
+            importVar = path.scope.generateUidIdentifier('__imports__');
+            node.body.push(t.importDeclaration([t.importSpecifier(tracked, t.stringLiteral('tracked'))], t.stringLiteral('@glimmer/tracking')));
           }
-          tracked = path.scope.generateUidIdentifier('tracked');
-          importVar = path.scope.generateUidIdentifier('__imports__');
-          node.body.push(t.importDeclaration([t.importSpecifier(tracked, t.stringLiteral('tracked'))], t.stringLiteral('@glimmer/tracking')));
           let usedImports = new Set();
           const addedIds = new Set();
           path.traverse({
