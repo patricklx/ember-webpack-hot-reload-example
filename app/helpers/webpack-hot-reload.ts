@@ -3,22 +3,20 @@ import { getOwner } from '@ember/owner';
 import { registerDestructor } from '@ember/destroyable';
 import { service } from '@ember/service';
 import { getComponentTemplate } from '@ember/component';
-import Ember from "ember";
-
+import Ember from 'ember';
 
 const CurriedValue = Ember.__loader.require('@glimmer/runtime').CurriedValue;
 
+const versionMap: Record<string, string> = {};
 
 export default class WebpackHotReload extends Helper {
   h: unknown;
-  version!: number;
   current: unknown;
   @service('webpack-hot-reload') webpackHotReload;
   originalCurried: unknown;
 
   constructor(...args) {
     super(...args);
-    this.version = 0;
     const bound = this.checkAndRecompute.bind(this);
     window.emberHotReloadPlugin.subscribe(bound);
     registerDestructor(this, () => {
@@ -37,7 +35,7 @@ export default class WebpackHotReload extends Helper {
         .replace(/\/index.(js|ts)$/, '')
         .replace(/\/index.(gjs|gts)$/, '');
       if (id.endsWith(this.current)) {
-        this.version = newModule.version;
+        versionMap[this.current] = newModule.version;
         this.current = null;
         this.recompute();
       }
@@ -83,28 +81,34 @@ export default class WebpackHotReload extends Helper {
     const type = named.type;
     if (typeof positional[0] === 'string') {
       const name = positional[0];
+      versionMap[name] = versionMap[name] || 0;
       if (type === 'component') {
         this.current = name;
-        return `${this.current}__hot_version__${this.version}`;
+        return `${this.current}__hot_version__${versionMap[name]}`;
       }
       if (type === 'modifier') {
         this.current = getOwner(this)!.factoryFor(
-          `modifier:${name}__hot_version__${this.version}`,
+          `modifier:${name}__hot_version__${versionMap[name]}`,
         )?.class;
         return this.current;
       }
       this.current = getOwner(this)!.lookup(
-        `helper:${name}__hot_version__${this.version}`,
+        `helper:${name}__hot_version__${versionMap[name]}`,
       );
     } else {
       // if we are here, its a curried value
-      const symb = Object.getOwnPropertySymbols(positional[0]).find(s => s.description === 'INNER')!;
+      const symb = Object.getOwnPropertySymbols(positional[0]).find(
+        (s) => s.description === 'INNER',
+      )!;
       this.current = this.originalCurried || positional[0][symb];
       if (!this.originalCurried) {
         this.originalCurried = this.current;
       }
       if (typeof this.originalCurried === 'string') {
-        const inner = `${this.originalCurried}__hot_version__${this.version}`;
+        versionMap[this.originalCurried] = versionMap[this.originalCurried] || 0;
+        const inner = `${this.originalCurried}__hot_version__${
+          versionMap[this.originalCurried]
+        }`;
         return new CurriedValue(
           0,
           inner,
@@ -117,4 +121,3 @@ export default class WebpackHotReload extends Helper {
     return this.current;
   }
 }
-

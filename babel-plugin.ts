@@ -1,15 +1,9 @@
-import type * as BabelCoreNamespace from '@babel/core';
-import { NodePath, PluginObj, parse } from '@babel/core';
-import type * as BabelTypesNamespace from '@babel/types';
-import {
-  ExpressionStatement,
-  Identifier,
-  ImportDeclaration, ImportSpecifier,
-  Program,
-  V8IntrinsicIdentifier,
-} from '@babel/types';
-import * as glimmer from '@glimmer/syntax';
-import { ASTv1, NodeVisitor, Path, WalkerPath } from '@glimmer/syntax';
+import type * as BabelCoreNamespace from "@babel/core";
+import core_1, { NodePath, parse, PluginObj } from "@babel/core";
+import type * as BabelTypesNamespace from "@babel/types";
+import { ExpressionStatement, Identifier, ImportDeclaration, Program, V8IntrinsicIdentifier } from "@babel/types";
+import * as glimmer from "@glimmer/syntax";
+import { ASTv1, NodeVisitor, WalkerPath } from "@glimmer/syntax";
 
 export type Babel = typeof BabelCoreNamespace;
 export type BabelTypes = typeof BabelTypesNamespace;
@@ -58,7 +52,11 @@ const builtInHelpers = [
   'helper',
 ];
 
-const hotAstProcessor = {
+function dasherize(str: string) {
+  return str.trim().split(/\.?(?=[A-Z])/).join('-').toLowerCase();
+}
+
+var hotAstProcessor = {
   options: {
     itsStatic: false,
   },
@@ -256,6 +254,7 @@ const hotAstProcessor = {
         if (findBlockParams(element.tag.split('.')[0], p)) return;
         if (importVar) {
           if (imports.includes(element.tag)) {
+            usedImports.add(element.tag);
             element.tag = `${importVar}.${element.tag}`;
           }
           return;
@@ -302,11 +301,12 @@ const hotAstProcessor = {
     };
 
     glimmer.traverse(ast, visitor);
+    return usedImports;
   },
 
   processAst(contents: string, importVar?: string, imports?: string[]) {
     const ast = glimmer.preprocess(contents);
-    this.replaceInAst(ast, importVar, imports);
+    this.usedImports = this.replaceInAst(ast, importVar, imports);
     return glimmer.print(ast);
   },
 };
@@ -322,86 +322,49 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
     visitor: {
       Program: {
         enter(path: NodePath<Program>) {
+          templateImportSpecifier = '';
+          importVar = null;
+          tracked = null;
+          importMap = {};
+          imports = [];
+          const filename = path.hub.file.opts.filename;
+          if (!filename.endsWith('.hbs') && !filename.endsWith('.gts') && filename.endsWith('.gjs')) {
+            return;
+          }
           const node = path.node;
           const templateImport = node.body.find(
             (i) =>
               i.type === 'ImportDeclaration' &&
               i.source.value === '@ember/template-compiler',
           );
-          const def = (templateImport as ImportDeclaration).specifiers[0];
-          templateImportSpecifier = (def as any).local.name;
-          tracked = path.scope.generateUidIdentifier('tracked');
-          importVar = path.scope.generateUidIdentifier('__imports__');
-          node.body.push(
-            t.importDeclaration(
-              [t.importSpecifier(tracked, t.stringLiteral('tracked'))],
-              t.stringLiteral('@glimmer/tracking'),
-            ),
-          );
+          if (templateImport) {
+            const def = (templateImport as ImportDeclaration).specifiers[0];
+            templateImportSpecifier = (def as any).local.name;
+            tracked = path.scope.generateUidIdentifier('tracked');
+            importVar = path.scope.generateUidIdentifier('__imports__');
+            node.body.push(
+              t.importDeclaration(
+                [t.importSpecifier(tracked, t.stringLiteral('tracked'))],
+                t.stringLiteral('@glimmer/tracking'),
+              ),
+            );
+          }
+          let usedImports = new Set();
+          const addedIds = new Set();
           path.traverse({
-            Program: {
-              exit(path: NodePath<Program>) {
-                const node = path.node;
-                const lastImport = [...node.body]
-                  .reverse()
-                  .find((x) => x.type === 'ImportDeclaration')!;
-                const idx = node.body.indexOf(lastImport);
-                const importsVar = t.variableDeclaration('let', [
-                  t.variableDeclarator(importVar),
-                ]);
-                const klass = t.classExpression(
-                  null,
-                  null,
-                  t.classBody(
-                    imports.map((i) => {
-                        const x = t.identifier(i);
-                        return t.classProperty(t.identifier(i), t.identifier(i), null, [
-                          t.decorator(tracked),
-                        ])
-                     }
-                    ),
-                  ),
-                );
-                const assignment = t.expressionStatement(
-                  t.assignmentExpression(
-                    '=',
-                    importVar,
-                    t.newExpression(klass, []),
-                  ),
-                );
-                const hotAccepts: ExpressionStatement[] = [];
-                for (const imp of imports) {
-                  const source = importMap[imp];
-                  const ast = parse(
-                    `import.meta.webpackHot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`,
-                  );
-                  const impHot = ast?.program.body[0] as ExpressionStatement;
-                  hotAccepts.push(impHot);
-                }
-                const ifHot = t.ifStatement(
-                  t.memberExpression(
-                    t.metaProperty(
-                      t.identifier('import'),
-                      t.identifier('meta'),
-                    ),
-                    t.identifier('webpackHot'),
-                  ),
-                  t.blockStatement([assignment, ...hotAccepts]),
-                );
-
-                node.body.splice(idx, 0, importsVar, ifHot);
-              },
+            ImportDeclaration: function (path) {
+              path.node.specifiers.forEach(function (s) {
+                imports.push(s.local.name);
+                importMap[s.local.name] = {
+                  source: path.node.source.value,
+                  specifiers: path.node.specifiers,
+                };
+              });
             },
-            Identifier(path: NodePath<Identifier>) {
-              if (path.scope.getBinding(path.node.name) && importMap[path.node.name] && !path.scope.getBinding(path.node.name)?.referencePaths.includes(path)) {
+            Identifier(path) {
+              if (addedIds.has(path.node)) {
                 path.scope.getBinding(path.node.name)?.referencePaths.push(path);
               }
-            },
-            ImportDeclaration(path: NodePath<ImportDeclaration>) {
-              path.node.specifiers.forEach((s) => {
-                imports.push(s.local.name);
-                importMap[s.local.name] = path.node.source.value;
-              });
             },
             CallExpression(path) {
               const call = path.node;
@@ -418,6 +381,7 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
                     importVar.name,
                     imports,
                   );
+                  usedImports = new Set([...usedImports, ...hotAstProcessor.usedImports]);
                 }
                 if (
                   call.arguments[0].type === 'TemplateLiteral' &&
@@ -429,6 +393,7 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
                       importVar.name,
                       imports,
                     );
+                  usedImports = new Set([...usedImports, ...hotAstProcessor.usedImports]);
                 }
               }
               if (
@@ -442,6 +407,58 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
               }
             },
           });
+          if (!templateImportSpecifier) return;
+          const lastImport = [...node.body]
+            .reverse()
+            .find((x) => x.type === 'ImportDeclaration')!;
+          const idx = node.body.indexOf(lastImport);
+          const importsVar = t.variableDeclaration('let', [
+            t.variableDeclarator(importVar),
+          ]);
+          const klass = t.classExpression(
+            null,
+            null,
+            t.classBody(
+              [...usedImports].map((i) => {
+                  const x = t.identifier(i);
+                  addedIds.add(x);
+                  return t.classProperty(t.identifier(i), x, null, [
+                    t.decorator(tracked),
+                  ])
+                }
+              ),
+            ),
+          );
+          const assignment = t.expressionStatement(
+            t.assignmentExpression(
+              '=',
+              importVar,
+              t.newExpression(klass, []),
+            ),
+          );
+          const hotAccepts: ExpressionStatement[] = [];
+          const ast = (0, core_1.parse)("window.emberHotReloadPlugin.clear(__webpack_module__)");
+          hotAccepts.push(ast.program.body[0]!);
+          for (const imp of [...usedImports]) {
+            const source = importMap[imp];
+            const ast = parse(
+              `import.meta.webpackHot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`,
+            );
+            const impHot = ast?.program.body[0] as ExpressionStatement;
+            hotAccepts.push(impHot);
+          }
+          const ifHot = t.ifStatement(
+            t.memberExpression(
+              t.metaProperty(
+                t.identifier('import'),
+                t.identifier('meta'),
+              ),
+              t.identifier('webpackHot'),
+            ),
+            t.blockStatement([assignment, ...hotAccepts]),
+          );
+
+          node.body.splice(idx, 0, importsVar, ifHot);
         },
       },
     },

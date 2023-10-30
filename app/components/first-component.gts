@@ -9,7 +9,7 @@ export default class Test extends Component {
   @tracked
   number = 3;
 
-  number2 = 23;
+  number2 = 28;
   <template>
     Welcome hot {{this.number}} {{this.number2}}
     <br />
