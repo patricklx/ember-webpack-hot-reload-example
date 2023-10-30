@@ -336,6 +336,7 @@ function hotReplaceAst(_a) {
               }
             },
           });
+          if (!templateImportSpecifier) return;
           var lastImport = __spreadArray([], node.body, true).reverse()
             .find(function (x) { return x.type === 'ImportDeclaration'; });
           var idx = node.body.indexOf(lastImport);
