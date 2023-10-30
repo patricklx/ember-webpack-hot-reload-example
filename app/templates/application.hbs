@@ -8,8 +8,9 @@
 {{! Feel free to remove this! }}
 
 
-{{#let this.FirstComponent as |output|}}
+{{#let (component 'first-component') as |output|}}
   {{output}}
+  <output></output>
 {{/let}}
 
 
@@ -17,12 +18,12 @@
 
 </div>
 
-{{FirstComponent}}
 
 <br />
 26
 
 <br />
+
 
 {{this.x}}
 

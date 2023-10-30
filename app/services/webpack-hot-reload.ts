@@ -37,12 +37,14 @@ if (import.meta.webpackHot) {
       this.moduleDepCallbacks[module.id] = {};
     },
     register(module, dep, callback) {
+      dep = dep.replace(new RegExp(`^${modulePrefix}/`), './');
       this.moduleDepCallbacks[module.id][dep] = this.moduleDepCallbacks[module.id][dep] || [];
       this.moduleDepCallbacks[module.id][dep].push(callback);
     },
     loadNew(oldModule, newModule) {
       newModule.parents.forEach((p) => {
-        this.moduleDepCallbacks[p]?.[newModule.id]?.forEach(cb=>cb(newModule));
+        const mId = newModule.id.split('.').slice(0, -1).join('.');
+        this.moduleDepCallbacks[p]?.[mId]?.forEach(cb=>cb(newModule));
       })
       const id = oldModule.id
         .replace('./', modulePrefix + '/')

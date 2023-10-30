@@ -3,6 +3,10 @@ import { getOwner } from '@ember/owner';
 import { registerDestructor } from '@ember/destroyable';
 import { service } from '@ember/service';
 import { getComponentTemplate } from '@ember/component';
+import Ember from "ember";
+
+
+const CurriedValue = Ember.__loader.require('@glimmer/runtime').CurriedValue;
 
 
 export default class WebpackHotReload extends Helper {
@@ -10,6 +14,7 @@ export default class WebpackHotReload extends Helper {
   version!: number;
   current: unknown;
   @service('webpack-hot-reload') webpackHotReload;
+  originalCurried: unknown;
 
   constructor(...args) {
     super(...args);
@@ -75,9 +80,9 @@ export default class WebpackHotReload extends Helper {
     if (this.current) {
       return this.current;
     }
+    const type = named.type;
     if (typeof positional[0] === 'string') {
       const name = positional[0];
-      const type = named.type;
       if (type === 'component') {
         this.current = name;
         return `${this.current}__hot_version__${this.version}`;
@@ -94,7 +99,20 @@ export default class WebpackHotReload extends Helper {
     } else {
       // if we are here, its a curried value
       const symb = Object.getOwnPropertySymbols(positional[0]).find(s => s.description === 'INNER')!;
-      this.current = positional[0][symb];
+      this.current = this.originalCurried || positional[0][symb];
+      if (!this.originalCurried) {
+        this.originalCurried = this.current;
+      }
+      if (typeof this.originalCurried === 'string') {
+        const inner = `${this.originalCurried}__hot_version__${this.version}`;
+        return new CurriedValue(
+          0,
+          inner,
+          getOwner(this),
+          { named: {}, positional: [] },
+          false,
+        );
+      }
     }
     return this.current;
   }

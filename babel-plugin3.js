@@ -65,6 +65,11 @@ var builtInHelpers = [
   'modifier',
   'helper',
 ];
+
+function dasherize(str) {
+  return str.trim().split(/\.?(?=[A-Z])/).join('-').toLowerCase();
+}
+
 var hotAstProcessor = {
   options: {
     itsStatic: false,
@@ -226,7 +231,7 @@ var hotAstProcessor = {
         }
         if (element.tag[0] === element.tag[0].toUpperCase()) {
           var sub = glimmer.builders.sexpr('component', [
-            glimmer.builders.string(element.tag),
+            glimmer.builders.string(dasherize(element.tag)),
           ]);
           var param = glimmer.builders.sexpr('webpack-hot-reload', [sub], glimmer.builders.hash([
             glimmer.builders.pair('type', glimmer.builders.string('component')),
@@ -276,6 +281,11 @@ function hotReplaceAst(_a) {
     visitor: {
       Program: {
         enter: function (path) {
+          templateImportSpecifier = '';
+          importVar = null;
+          tracked = null;
+          importMap = {};
+          imports = [];
           const filename = path.hub.file.opts.filename;
           if (!filename.endsWith('.hbs') && !filename.endsWith('.gts') && filename.endsWith('.gjs')) {
             return;
