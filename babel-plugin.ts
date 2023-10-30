@@ -4,7 +4,7 @@ import type * as BabelTypesNamespace from '@babel/types';
 import {
   ExpressionStatement,
   Identifier,
-  ImportDeclaration,
+  ImportDeclaration, ImportSpecifier,
   Program,
   V8IntrinsicIdentifier,
 } from '@babel/types';
@@ -353,10 +353,12 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
                   null,
                   null,
                   t.classBody(
-                    imports.map((i) =>
-                      t.classProperty(t.identifier(i), t.identifier(i), null, [
-                        t.decorator(tracked),
-                      ]),
+                    imports.map((i) => {
+                        const x = t.identifier(i);
+                        return t.classProperty(t.identifier(i), t.identifier(i), null, [
+                          t.decorator(tracked),
+                        ])
+                     }
                     ),
                   ),
                 );
@@ -389,6 +391,11 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
 
                 node.body.splice(idx, 0, importsVar, ifHot);
               },
+            },
+            Identifier(path: NodePath<Identifier>) {
+              if (path.scope.getBinding(path.node.name) && importMap[path.node.name] && !path.scope.getBinding(path.node.name)?.referencePaths.includes(path)) {
+                path.scope.getBinding(path.node.name)?.referencePaths.push(path);
+              }
             },
             ImportDeclaration(path: NodePath<ImportDeclaration>) {
               path.node.specifiers.forEach((s) => {

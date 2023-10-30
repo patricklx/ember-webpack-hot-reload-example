@@ -7,7 +7,7 @@ module.exports = function (defaults) {
   const app = new EmberApp(defaults, {
     'ember-cli-babel': { enableTypeScriptTransform: true },
     babel: {
-      plugins: [require.resolve('./babel-plugin.js')]
+      plugins: [require.resolve('./babel-plugin3.js')]
     }
   });
 

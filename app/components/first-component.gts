@@ -3,7 +3,7 @@ import printNumber from 'hot-reload/helpers/print-number';
 import { tracked } from "@glimmer/tracking";
 
 
-console.log('dsfadafgggfgasgsassddssd');
+console.log('ass');
 
 export default class Test extends Component {
   @tracked
@@ -15,6 +15,7 @@ export default class Test extends Component {
     <br />
 
     {{printNumber}}
+    end
 
   </template>
 }
