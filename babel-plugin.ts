@@ -1,15 +1,12 @@
 import type * as BabelCoreNamespace from '@babel/core';
 import { NodePath, PluginObj, parse } from '@babel/core';
 import type * as BabelTypesNamespace from '@babel/types';
-import decoratorTransform from '@babel/plugin-proposal-decorators';
 import {
   ExpressionStatement,
   Identifier,
   ImportDeclaration,
-  ImportDefaultSpecifier,
-  ImportSpecifier,
   Program,
-  V8IntrinsicIdentifier
+  V8IntrinsicIdentifier,
 } from '@babel/types';
 import * as glimmer from '@glimmer/syntax';
 import { ASTv1, NodeVisitor, Path, WalkerPath } from '@glimmer/syntax';
@@ -66,7 +63,11 @@ const hotAstProcessor = {
     itsStatic: false,
   },
   counter: 0,
-  replaceInAst(ast: glimmer.ASTv1.Template, importVar?: string, imports?: string[]) {
+  replaceInAst(
+    ast: glimmer.ASTv1.Template,
+    importVar?: string,
+    imports?: string[],
+  ) {
     const hotReplaced = {
       components: new Set<string>(),
       helpers: new Set<string>(),
@@ -82,10 +83,6 @@ const hotAstProcessor = {
         },
       },
     };
-
-    const components = hotReplaced.info.components;
-    const helpers = hotReplaced.info.helpers;
-    const modifiers = hotReplaced.info.modifiers;
 
     const findBlockParams = function (
       expression: string,
@@ -134,16 +131,20 @@ const hotAstProcessor = {
         const blockParams = [];
         const letBlock = glimmer.builders.path('let');
         if (
-            node.original === 'helper' ||
-            node.original === 'component' ||
-            node.original === 'modifier'
+          node.original === 'helper' ||
+          node.original === 'component' ||
+          node.original === 'modifier'
         ) {
-          if (p.parentNode.params[0].original && findBlockParams(p.parentNode.params[0].original.split('.')[0], p)) return;
+          if (
+            p.parentNode.params[0].original &&
+            findBlockParams(p.parentNode.params[0].original.split('.')[0], p)
+          )
+            return;
           if (p.parentNode.params[0].original?.includes('.')) return;
           const sub = glimmer.builders.sexpr(
-              node.original,
-              [ ...p.parentNode.params ],
-              {...p.parentNode.hash}
+            node.original,
+            [...p.parentNode.params],
+            { ...p.parentNode.hash },
           );
           const param = glimmer.builders.sexpr(
             'webpack-hot-reload',
@@ -160,7 +161,10 @@ const hotAstProcessor = {
           blockParams.push(name);
           node.type = 'PathExpression';
           node.original = name;
-          const block = glimmer.builders.blockItself([{...p.parentNode}], blockParams);
+          const block = glimmer.builders.blockItself(
+            [{ ...p.parentNode }],
+            blockParams,
+          );
           const b = glimmer.builders.block(letBlock, params, null, block);
           if (p.parentNode.type === 'SubExpression') {
             changes.push([p.parentNode, param]);
@@ -177,9 +181,7 @@ const hotAstProcessor = {
         if (!builtInHelpers.includes(node.original)) {
           if (p.parentNode?.type === 'ElementModifierStatement') return;
         }
-        const firstLetter = node.original
-          .split('.')
-          .slice(-1)[0]![0]!;
+        const firstLetter = node.original.split('.').slice(-1)[0]![0]!;
         let type = 'helper';
         if (
           (this.options.itsStatic &&
@@ -188,18 +190,14 @@ const hotAstProcessor = {
         ) {
           type = 'component';
         }
-        const sub = glimmer.builders.sexpr(
-            type,
-            [ glimmer.builders.string(node.original) ]
-        );
+        const sub = glimmer.builders.sexpr(type, [
+          glimmer.builders.string(node.original),
+        ]);
         const param = glimmer.builders.sexpr(
           'webpack-hot-reload',
           [sub],
           glimmer.builders.hash([
-            glimmer.builders.pair(
-              'type',
-              glimmer.builders.string(type),
-            ),
+            glimmer.builders.pair('type', glimmer.builders.string(type)),
           ]),
         );
         params.push(param);
@@ -208,7 +206,10 @@ const hotAstProcessor = {
         node.type = 'PathExpression';
         node.original = name;
         if (!params.length) return;
-        const block = glimmer.builders.blockItself([{...p.parentNode} as typeof p.parentNode], blockParams);
+        const block = glimmer.builders.blockItself(
+          [{ ...p.parentNode }],
+          blockParams,
+        );
         const b = glimmer.builders.block(letBlock, params, null, block);
         changes.push([p.parentNode!, b]);
         this.counter++;
@@ -225,11 +226,15 @@ const hotAstProcessor = {
             return;
           }
           if (!modifier.path.original) return;
-          if (modifier.path.original && modifier.path.original.includes('.')) return
-          const sub = glimmer.builders.sexpr(
-              'modifier',
-              [ { ...(modifier.path.original && glimmer.builders.string(modifier.path.original) || modifier.path) } ]
-          );
+          if (modifier.path.original && modifier.path.original.includes('.'))
+            return;
+          const sub = glimmer.builders.sexpr('modifier', [
+            {
+              ...((modifier.path.original &&
+                glimmer.builders.string(modifier.path.original)) ||
+                modifier.path),
+            },
+          ]);
           const param = glimmer.builders.sexpr(
             'webpack-hot-reload',
             [sub],
@@ -248,8 +253,7 @@ const hotAstProcessor = {
           this.counter++;
         });
 
-        if (findBlockParams(element.tag.split('.')[0], p))
-          return;
+        if (findBlockParams(element.tag.split('.')[0], p)) return;
         if (importVar) {
           if (imports.includes(element.tag)) {
             element.tag = `${importVar}.${element.tag}`;
@@ -260,26 +264,29 @@ const hotAstProcessor = {
           return;
         }
         if (element.tag[0] === element.tag[0].toUpperCase()) {
-          const sub = glimmer.builders.sexpr(
-              'component',
-              [ glimmer.builders.string(element.tag) ]
-          );
+          const sub = glimmer.builders.sexpr('component', [
+            glimmer.builders.string(element.tag),
+          ]);
           const param = glimmer.builders.sexpr(
-              'webpack-hot-reload',
-              [sub],
-              glimmer.builders.hash([
-                glimmer.builders.pair(
-                    'type',
-                    glimmer.builders.string('component'),
-                ),
-              ]),
+            'webpack-hot-reload',
+            [sub],
+            glimmer.builders.hash([
+              glimmer.builders.pair(
+                'type',
+                glimmer.builders.string('component'),
+              ),
+            ]),
           );
           params.push(param);
           const name = 'Component_' + this.counter;
           blockParams.push(name);
           element.tag = name;
         }
-        const block = glimmer.builders.blockItself([{...element}], blockParams);
+        const block = glimmer.builders.blockItself(
+          [{ ...element }],
+          blockParams,
+        );
+        if (!params.length) return;
         const b = glimmer.builders.block(letBlock, params, null, block);
         changes.push([element, b]);
         this.counter++;
@@ -287,12 +294,12 @@ const hotAstProcessor = {
       Program: {
         exit() {
           changes.forEach(([oldNode, newNode]) => {
-            for (var member in oldNode) delete oldNode[member];
+            for (const member in oldNode) delete oldNode[member];
             Object.assign(oldNode, newNode);
-          })
-        }
-      }
-    }
+          });
+        },
+      },
+    };
 
     glimmer.traverse(ast, visitor);
   },
@@ -306,7 +313,7 @@ const hotAstProcessor = {
 
 export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
   const imports: string[] = [];
-  const importMap: Record<string, string>  = {};
+  const importMap: Record<string, string> = {};
   let tracked: Identifier;
   let importVar: Identifier;
   let templateImportSpecifier = '';
@@ -316,76 +323,119 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
       Program: {
         enter(path: NodePath<Program>) {
           const node = path.node;
-          const templateImport = node.body.find(i => i.type === 'ImportDeclaration' && i.source.value === '@ember/template-compiler');
+          const templateImport = node.body.find(
+            (i) =>
+              i.type === 'ImportDeclaration' &&
+              i.source.value === '@ember/template-compiler',
+          );
           const def = (templateImport as ImportDeclaration).specifiers[0];
           templateImportSpecifier = (def as any).local.name;
           tracked = path.scope.generateUidIdentifier('tracked');
-          importVar = path.scope.generateUidIdentifier('__imports__')
+          importVar = path.scope.generateUidIdentifier('__imports__');
           node.body.push(
-              t.importDeclaration([
-                    t.importDefaultSpecifier(tracked)
-                  ],
-                  t.stringLiteral('@glimmer/tracking')
-              )
+            t.importDeclaration(
+              [t.importSpecifier(tracked, t.stringLiteral('tracked'))],
+              t.stringLiteral('@glimmer/tracking'),
+            ),
           );
-        },
-        exit(path: NodePath<Program>) {
-          const node = path.node;
-          const lastImport = [...node.body].reverse().find(x => x.type === 'ImportDeclaration')!;
-          const idx = node.body.indexOf(lastImport);
-          const importsVar = t.variableDeclaration('let', [t.variableDeclarator(
-              importVar
-          )]);
-          const klass = t.classExpression(null, null, t.classBody(imports.map(i => t.classProperty(t.identifier(i), t.identifier(i), null, [t.decorator(tracked)]))));
-          const assignment = t.expressionStatement(t.assignmentExpression('=', importVar, t.newExpression(klass, [])));
-          const hotAccepts: ExpressionStatement[] = [];
-          for (const imp of imports) {
-            const source = importMap[imp];
-            const ast = parse(`import.meta.hot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`);
-            const impHot = ast?.program.body[0] as ExpressionStatement;
-            hotAccepts.push(impHot);
-          }
-          const ifHot = t.ifStatement(
-              t.memberExpression(t.metaProperty(t.identifier('import'), t.identifier('meta')), t.identifier('webpackHot')),
-              t.blockStatement([assignment, ...hotAccepts])
-          )
+          path.traverse({
+            Program: {
+              exit(path: NodePath<Program>) {
+                const node = path.node;
+                const lastImport = [...node.body]
+                  .reverse()
+                  .find((x) => x.type === 'ImportDeclaration')!;
+                const idx = node.body.indexOf(lastImport);
+                const importsVar = t.variableDeclaration('let', [
+                  t.variableDeclarator(importVar),
+                ]);
+                const klass = t.classExpression(
+                  null,
+                  null,
+                  t.classBody(
+                    imports.map((i) =>
+                      t.classProperty(t.identifier(i), t.identifier(i), null, [
+                        t.decorator(tracked),
+                      ]),
+                    ),
+                  ),
+                );
+                const assignment = t.expressionStatement(
+                  t.assignmentExpression(
+                    '=',
+                    importVar,
+                    t.newExpression(klass, []),
+                  ),
+                );
+                const hotAccepts: ExpressionStatement[] = [];
+                for (const imp of imports) {
+                  const source = importMap[imp];
+                  const ast = parse(
+                    `import.meta.webpackHot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`,
+                  );
+                  const impHot = ast?.program.body[0] as ExpressionStatement;
+                  hotAccepts.push(impHot);
+                }
+                const ifHot = t.ifStatement(
+                  t.memberExpression(
+                    t.metaProperty(
+                      t.identifier('import'),
+                      t.identifier('meta'),
+                    ),
+                    t.identifier('webpackHot'),
+                  ),
+                  t.blockStatement([assignment, ...hotAccepts]),
+                );
 
-          node.body.splice(idx, 0, importsVar, ifHot);
-        }
-      },
-      ImportDeclaration(path: NodePath<ImportDeclaration>) {
-        path.node.specifiers.forEach((s) =>  {
-          imports.push(s.local.name);
-          importMap[s.local.name] = path.node.source.value;
-        });
-      },
-      CallExpression(path) {
-        const call = path.node;
-        if (templateImportSpecifier && (call.callee as V8IntrinsicIdentifier).name === templateImportSpecifier && (call.arguments[0]?.type === 'StringLiteral' || call.arguments[0]?.type === 'TemplateLiteral')) {
-          if (call.arguments[0].type === 'StringLiteral') {
-            call.arguments[0].value = hotAstProcessor.processAst(
-                call.arguments[0].value,
-                importVar.name,
-                imports
-            );
-          }
-          if (call.arguments[0].type === 'TemplateLiteral' && call.arguments[0].quasis[0]) {
-            call.arguments[0].quasis[0].value.raw = hotAstProcessor.processAst(
-                call.arguments[0].quasis[0].value.raw,
-                importVar.name,
-                imports
-            );
-          }
-        }
-        if (
-          (call.callee as V8IntrinsicIdentifier).name ===
-            'precompileTemplate' &&
-          call.arguments[0]?.type === 'StringLiteral'
-        ) {
-          call.arguments[0].value = hotAstProcessor.processAst(
-            call.arguments[0].value
-          );
-        }
+                node.body.splice(idx, 0, importsVar, ifHot);
+              },
+            },
+            ImportDeclaration(path: NodePath<ImportDeclaration>) {
+              path.node.specifiers.forEach((s) => {
+                imports.push(s.local.name);
+                importMap[s.local.name] = path.node.source.value;
+              });
+            },
+            CallExpression(path) {
+              const call = path.node;
+              if (
+                templateImportSpecifier &&
+                (call.callee as V8IntrinsicIdentifier).name ===
+                  templateImportSpecifier &&
+                (call.arguments[0]?.type === 'StringLiteral' ||
+                  call.arguments[0]?.type === 'TemplateLiteral')
+              ) {
+                if (call.arguments[0].type === 'StringLiteral') {
+                  call.arguments[0].value = hotAstProcessor.processAst(
+                    call.arguments[0].value,
+                    importVar.name,
+                    imports,
+                  );
+                }
+                if (
+                  call.arguments[0].type === 'TemplateLiteral' &&
+                  call.arguments[0].quasis[0]
+                ) {
+                  call.arguments[0].quasis[0].value.raw =
+                    hotAstProcessor.processAst(
+                      call.arguments[0].quasis[0].value.raw,
+                      importVar.name,
+                      imports,
+                    );
+                }
+              }
+              if (
+                (call.callee as V8IntrinsicIdentifier).name ===
+                  'precompileTemplate' &&
+                call.arguments[0]?.type === 'StringLiteral'
+              ) {
+                call.arguments[0].value = hotAstProcessor.processAst(
+                  call.arguments[0].value,
+                );
+              }
+            },
+          });
+        },
       },
     },
   } as PluginObj;

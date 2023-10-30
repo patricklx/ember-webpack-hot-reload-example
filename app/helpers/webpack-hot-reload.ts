@@ -2,16 +2,14 @@ import Helper from '@ember/component/helper';
 import { getOwner } from '@ember/owner';
 import { registerDestructor } from '@ember/destroyable';
 import { service } from '@ember/service';
-import WebpackHotReloadService from 'hot-reload/services/webpack-hot-reload';
 import { getComponentTemplate } from '@ember/component';
-import Ember from 'ember';
 
 
 export default class WebpackHotReload extends Helper {
   h: unknown;
   version!: number;
   current: unknown;
-  @service() webpackHotReload!: WebpackHotReloadService;
+  @service('webpack-hot-reload') webpackHotReload;
 
   constructor(...args) {
     super(...args);

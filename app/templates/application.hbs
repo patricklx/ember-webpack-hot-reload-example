@@ -7,7 +7,6 @@
 {{/let}}
 {{! Feel free to remove this! }}
 
-<div {{my-modifier}} />
 
 {{#let this.FirstComponent as |output|}}
   {{output}}
@@ -15,12 +14,14 @@
 
 <div {{this.myModifier}}></div>
 
-{{(this.printNumbers)}}
+{{first-component}}
+
 <br />
 26
+
 <br />
 {{this.x}}
 
-{{outlet}}
 
+{{outlet}}
 
