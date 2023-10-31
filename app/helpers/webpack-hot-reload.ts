@@ -4,19 +4,27 @@ import { registerDestructor } from '@ember/destroyable';
 import { service } from '@ember/service';
 import { getComponentTemplate } from '@ember/component';
 import Ember from 'ember';
+import WebpackHotReloadService from 'hot-reload/services/webpack-hot-reload';
 
-const CurriedValue = Ember.__loader.require('@glimmer/runtime').CurriedValue;
-
-const versionMap: Record<string, string> = {};
+const CurriedValue = (Ember as any).__loader.require('@glimmer/runtime').CurriedValue;
 
 export default class WebpackHotReload extends Helper {
   h: unknown;
   current: unknown;
-  @service('webpack-hot-reload') webpackHotReload;
+  @service('webpack-hot-reload') webpackHotReload!: WebpackHotReloadService;
   originalCurried: unknown;
+  resolver: any;
+  type!: string;
+  podModulePrefix: string;
+  modulePrefix: string;
+  resolvedPath!: string;
 
-  constructor(...args) {
+  constructor(...args: any[]) {
     super(...args);
+    const app = (getOwner(this) as any).application;
+    this.resolver = app.__registry__.resolver;
+    this.modulePrefix = app.modulePrefix;
+    this.podModulePrefix = app.podModulePrefix;
     const bound = this.checkAndRecompute.bind(this);
     window.emberHotReloadPlugin.subscribe(bound);
     registerDestructor(this, () => {
@@ -24,18 +32,11 @@ export default class WebpackHotReload extends Helper {
     });
   }
 
-  checkAndRecompute(oldModule, newModule) {
+  checkAndRecompute(oldModule: any, newModule: any) {
     if (typeof this.current === 'string') {
-      const id = oldModule.id
-        .replace(/\/template.hbs$/, '')
-        .replace(/\.hbs$/, '')
-        .replace(/\.(js|ts|gjs|gts)$/, '')
-        .replace(/\/component.(js|ts)$/, '')
-        .replace(/\/component.(gjs|gts)$/, '')
-        .replace(/\/index.(js|ts)$/, '')
-        .replace(/\/index.(gjs|gts)$/, '');
-      if (id.endsWith(this.current)) {
-        versionMap[this.current] = newModule.version;
+      const resolvedPath = this.resolvedPath;
+
+      if (newModule.id.startsWith(resolvedPath) && newModule.id.replace(resolvedPath, '').startsWith('.')) {
         this.current = null;
         this.recompute();
       }
@@ -74,26 +75,30 @@ export default class WebpackHotReload extends Helper {
     }
   }
 
-  compute(positional, named) {
+  compute(positional: any[], named: { type: string }) {
     if (this.current) {
       return this.current;
     }
     const type = named.type;
     if (typeof positional[0] === 'string') {
       const name = positional[0];
-      versionMap[name] = versionMap[name] || 0;
+      const resolvedPath = this.resolver.lookupDescription(`${type}:${name}`);
+      this.resolvedPath = resolvedPath
+          ?.replace(new RegExp(`^${this.modulePrefix}/`), './')
+          ?.replace(new RegExp(`^${this.podModulePrefix}/`), './');
+      const version = window.emberHotReloadPlugin.versionMap[resolvedPath] || 0;
       if (type === 'component') {
         this.current = name;
-        return `${this.current}__hot_version__${versionMap[name]}`;
+        return `${this.current}__hot_version__${version}`;
       }
       if (type === 'modifier') {
         this.current = getOwner(this)!.factoryFor(
-          `modifier:${name}__hot_version__${versionMap[name]}`,
+          `modifier:${name}__hot_version__${version}`,
         )?.class;
         return this.current;
       }
       this.current = getOwner(this)!.lookup(
-        `helper:${name}__hot_version__${versionMap[name]}`,
+        `helper:${name}__hot_version__${version}`,
       );
     } else {
       // if we are here, its a curried value
@@ -105,9 +110,13 @@ export default class WebpackHotReload extends Helper {
         this.originalCurried = this.current;
       }
       if (typeof this.originalCurried === 'string') {
-        versionMap[this.originalCurried] = versionMap[this.originalCurried] || 0;
+        const curriedResolvedPath = this.resolver.lookupDescription(`${type}:${this.originalCurried}`);
+        this.resolvedPath = curriedResolvedPath
+            ?.replace(new RegExp(`^${this.modulePrefix}/`), './')
+            ?.replace(new RegExp(`^${this.podModulePrefix}/`), './');
+        const version = window.emberHotReloadPlugin.versionMap[curriedResolvedPath] || 0;
         const inner = `${this.originalCurried}__hot_version__${
-          versionMap[this.originalCurried]
+            version
         }`;
         return new CurriedValue(
           0,

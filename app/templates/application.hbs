@@ -1,31 +1,32 @@
 {{page-title "HotReload"}}
 
+{{#if this.renderA}}
 {{! The following component displays Ember's default welcome message. }}
-<br />
-{{#let (helper 'print-number') as |output|}}
-  helpler {{output}}
-{{/let}}
-{{! Feel free to remove this! }}
+    <br />
+    {{#let (helper 'print-number') as |output|}}
+        helpler {{output}}
+    {{/let}}
+    {{! Feel free to remove this! }}
 
 
-{{#let (component 'first-component') as |output|}}
-  {{#output}}{{/output}}
-  <output></output>
-{{/let}}
+    {{#let (component 'first-component') as |output|}}
+        {{#output}}{{/output}}
+        <output></output>
+    {{/let}}
 
 
-<div {{this.myModifier}}>
+    <div {{this.myModifier}}>
 
-</div>
-
-
-<br />
-26
-
-<br />
+    </div>
 
 
-{{this.x}}
+    <br />
+    26
+
+    <br />
 
 
+    {{this.x}}
+{{/if}}
+<button {{on 'click' this.toggleRender}}>switch</button>
 {{outlet}}

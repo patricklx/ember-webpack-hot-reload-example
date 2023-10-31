@@ -1,7 +1,8 @@
 export function initialize(applicationInstance) {
   applicationInstance.lookup('service:webpack-hot-reload');
-  const resolverResolve = applicationInstance.application.Resolver.prototype.resolve;
-  applicationInstance.application.Resolver.prototype.resolve = function (name) {
+  const Resolver = applicationInstance.application.Resolver;
+  const resolverResolve = Resolver.prototype.resolve;
+  Resolver.prototype.resolve = function(name: string) {
     name = name.replace(/--hot-version--.*$/, '');
     return resolverResolve.call(this, name);
   };

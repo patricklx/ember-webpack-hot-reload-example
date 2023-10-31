@@ -10,5 +10,9 @@
       "hot-reload/*": ["app/*"],
       "*": ["types/*"]
     }
-  }
+  },
+  "include": [
+    "app/**/*",
+    "types/global.d.ts"
+  ]
 }

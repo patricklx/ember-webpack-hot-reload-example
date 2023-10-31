@@ -9,6 +9,7 @@ import GlimmerComponent from '@glimmer/component';
 import { getOwner } from '@ember/owner';
 import RouterService from '@ember/routing/router-service';
 import Router from '@ember/routing/router';
+import Controller from '@ember/controller';
 
 const TemplateOnlyComponent =
   Ember.__loader.require('@glimmer/runtime').TemplateOnlyComponent;
@@ -33,6 +34,7 @@ if (import.meta.webpackHot) {
     subscribers: [],
     version: 1,
     moduleDepCallbacks: {},
+    versionMap: {},
     clear(module) {
       this.moduleDepCallbacks[module.id] = {};
     },
@@ -50,6 +52,7 @@ if (import.meta.webpackHot) {
         .replace('./', modulePrefix + '/')
         .replace(/\.(hbs|ts|js|gjs|gts)/, '');
       requirejs(id);
+      this.versionMap[id] = newModule.version;
       if (
         oldModule.exports.default?.prototype instanceof EmberComponent ||
         oldModule.exports.default?.prototype instanceof GlimmerComponent ||
@@ -213,7 +216,10 @@ export default class WebpackHotReloadService extends Service {
           delete this.container.registry.registrations[k];
         }
       });
-      if (oldModule.exports.default && oldModule.exports.default instanceof Router) {
+      if (oldModule.exports.default?.prototype && oldModule.exports.default.prototype instanceof Router) {
+        this.router.refresh();
+      }
+      if (oldModule.exports.default?.prototype && oldModule.exports.default.prototype instanceof Controller) {
         this.router.refresh();
       }
       if (oldModule.id.startsWith('./templates/') && !oldModule.id.startsWith('./templates/components/')) {

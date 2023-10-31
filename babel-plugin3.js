@@ -202,6 +202,9 @@ var hotAstProcessor = {
             return;
           if (modifier.path.original && modifier.path.original.includes('.'))
             return;
+          if (builtInHelpers.includes(modifier.path.original)) {
+            return;
+          }
           var sub = glimmer.builders.sexpr('modifier', [
             __assign({}, ((modifier.path.original &&
                 glimmer.builders.string(modifier.path.original)) ||
@@ -375,7 +378,7 @@ function hotReplaceAst(_a) {
           }
           var ifHot = t.ifStatement(t.memberExpression(t.metaProperty(t.identifier('import'), t.identifier('meta')), t.identifier('webpackHot')), t.blockStatement(__spreadArray([assignment], hotAccepts, true)));
           node.body.splice(idx, 0, importsVar, ifHot);
-        },
+        }
       },
     },
   };
