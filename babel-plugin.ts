@@ -1,9 +1,9 @@
-import type * as BabelCoreNamespace from "@babel/core";
-import core_1, { NodePath, parse, PluginObj } from "@babel/core";
-import type * as BabelTypesNamespace from "@babel/types";
-import { ExpressionStatement, Identifier, ImportDeclaration, Program, V8IntrinsicIdentifier } from "@babel/types";
-import * as glimmer from "@glimmer/syntax";
-import { ASTv1, NodeVisitor, WalkerPath } from "@glimmer/syntax";
+import type * as BabelCoreNamespace from '@babel/core';
+import core_1, { NodePath, parse, PluginObj } from '@babel/core';
+import type * as BabelTypesNamespace from '@babel/types';
+import { ExpressionStatement, Identifier, ImportDeclaration, Program, V8IntrinsicIdentifier } from '@babel/types';
+import * as glimmer from '@glimmer/syntax';
+import { ASTv1, NodeVisitor, WalkerPath } from '@glimmer/syntax';
 
 export type Babel = typeof BabelCoreNamespace;
 export type BabelTypes = typeof BabelTypesNamespace;
@@ -61,11 +61,13 @@ var hotAstProcessor = {
     itsStatic: false,
   },
   counter: 0,
+  usedImports: [],
   replaceInAst(
     ast: glimmer.ASTv1.Template,
     importVar?: string,
     imports?: string[],
   ) {
+    const usedImports = new Set();
     const hotReplaced = {
       components: new Set<string>(),
       helpers: new Set<string>(),
@@ -121,6 +123,7 @@ var hotAstProcessor = {
         if (findBlockParams(node.original.split('.')[0], p)) return;
         if (importVar) {
           if (imports.includes(node.original)) {
+            usedImports.add(node.original);
             node.original = `${importVar}.${node.original}`;
           }
           return;
@@ -226,6 +229,9 @@ var hotAstProcessor = {
           if (!modifier.path.original) return;
           if (modifier.path.original && modifier.path.original.includes('.'))
             return;
+          if (builtInHelpers.includes(modifier.path.original)) {
+            return;
+          }
           const sub = glimmer.builders.sexpr('modifier', [
             {
               ...((modifier.path.original &&
@@ -264,7 +270,7 @@ var hotAstProcessor = {
         }
         if (element.tag[0] === element.tag[0].toUpperCase()) {
           const sub = glimmer.builders.sexpr('component', [
-            glimmer.builders.string(element.tag),
+            glimmer.builders.string(dasherize(element.tag)),
           ]);
           const param = glimmer.builders.sexpr(
             'webpack-hot-reload',
@@ -319,6 +325,33 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
   let templateImportSpecifier = '';
   return {
     name: 'hbs-imports',
+    pre(state) {
+      const imports = state.ast.program.body.filter(
+          (b) => b.type === 'ImportDeclaration'
+      ) as t.ImportDeclaration[];
+      const templateCompilerImport = imports.find(
+          (i) => i.source.value === '@ember/template-compiler'
+      );
+
+      if (templateCompilerImport) {
+        const program = NodePath.get({
+          hub: state.hub,
+          key: 'program',
+          parent: state.ast,
+          parentPath: null,
+          container: state.ast,
+        });
+        for (const i of imports) {
+          const specifiers = i.specifiers;
+          for (const specifier of specifiers) {
+            const local = specifier.local;
+            if (!state.scope.getBinding(local.name)?.referencePaths.length) {
+              state.scope.getBinding(local.name)?.referencePaths.push(program);
+            }
+          }
+        }
+      }
+    },
     visitor: {
       Program: {
         enter(path: NodePath<Program>) {
@@ -440,9 +473,11 @@ export default function hotReplaceAst({ types: t }: { types: BabelTypes }) {
           const ast = (0, core_1.parse)("window.emberHotReloadPlugin.clear(__webpack_module__)");
           hotAccepts.push(ast.program.body[0]!);
           for (const imp of [...usedImports]) {
-            const source = importMap[imp];
+            const { source, specifiers } = importMap[imp];
+            const specifier = specifiers.find(s => s.local.name === imp);
+            const specifierName = specifier.imported?.name || specifier.imported?.value || 'default'
             const ast = parse(
-              `import.meta.webpackHot.accept('${source}', (${imp}) => ${importVar.name}.${imp} = ${imp});`,
+              `window.emberHotReloadPlugin.register(__webpack_module__, '${source}', (module) => (${importVar.name}.${imp}=module.exports['${specifierName}']))`,
             );
             const impHot = ast?.program.body[0] as ExpressionStatement;
             hotAccepts.push(impHot);

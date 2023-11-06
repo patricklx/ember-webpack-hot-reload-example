@@ -3,13 +3,13 @@ import printNumber from 'hot-reload/helpers/print-number';
 import { tracked } from "@glimmer/tracking";
 
 
-console.log('ass');
+console.log('asdsddssssas');
 
 export default class Test extends Component {
   @tracked
   number = 3;
 
-  number2 = 36;
+  number2 = 20;
   <template>
     Welcome hot {{this.number}} {{this.number2}}
     <br />
@@ -19,4 +19,3 @@ export default class Test extends Component {
 
   </template>
 }
-

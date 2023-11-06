@@ -9,7 +9,13 @@ export default class ApplicationController extends Controller {
   FirstComponent = FirstComponent;
   printNumbers = printNumber;
   myModifier = myModifier;
-  x= 11;
+
+  x= 21;
+
+  @action
+  getModifier() {
+    return this.myModifier;
+  }
 
 
 
